@@ -21,7 +21,7 @@ jobs:
         id: generate-matrix
         run: |
           echo "repos<<EOF" >> $GITHUB_OUTPUT
-          jq -s '[.[][]]' repos*.json >> $GITHUB_OUTPUT
+          jq -s '[.[][]]' repos/repos*.json >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
       - name: "⏰ Set builddate"
         id: generate-builddate
@@ -29,7 +29,7 @@ jobs:
 
   Build-Kernel:
     name: "🐎 Build kernel"
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     needs:
       - Set-repos
     strategy:
@@ -50,13 +50,34 @@ jobs:
       DEFCONFIG_NAME: ${{ matrix.repos.kernelSource.defconfig }}
 
       withKernelSU: ${{ matrix.repos.withKernelSU }}
+      ccache: ${{ matrix.repos.ccache }}
       useAnykernel: ${{ matrix.repos.AnyKernel3.use }}
       release: ${{ matrix.repos.AnyKernel3.release }}
     steps:
       - name: "⭐ Install prerequisites"
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential bc curl git zip ftp gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev lftp zstd wget libfl-dev python2 python3 libarchive-tools
+          sudo apt-get install -y build-essential bc gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev libfl-dev
+          sudo apt-get install -y curl git ftp lftp wget libarchive-tools ccache python2 python2-dev
+          sudo apt-get install -y zip unzip tar gzip bzip2 rar unrar
+
+      - name: "🚄 Create cache key from `repos`"
+        if: ${{ env.ccache == 'true' }}
+        id: ccache_key
+        run: |
+          ccache -o compression=false -o cache_dir=$HOME/.ccache
+          echo "CACHE_KEY=$(echo -n '${{ toJSON(matrix.repos) }}' | base64 -w 0 | cut -c -48)" >> $GITHUB_OUTPUT
+
+      - name: "🚅 Cache ccache files"
+        if: ${{ env.ccache == 'true' }}
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.ccache
+            ${{ env.OUT_DIR }}
+          key: ccache-${{ env.KERNEL_NAME }}-${{ steps.ccache_key.outputs.CACHE_KEY }}-${{ env.builddate }}
+          restore-keys: |
+            ccache-${{ env.KERNEL_NAME }}-${{ steps.ccache_key.outputs.CACHE_KEY }}-${{ env.builddate }}
 
       - name: "⏰ Setup Anykernel3"
         env:
@@ -82,11 +103,38 @@ jobs:
           echo "🤔 There is $toolchains_num defined toolchains."
           for ((i=0;i<toolchains_num;i++)); do
             toolchain_name=$(echo $toolchains | jq -r ".[$i].name")
+            # Github
             toolchain_repo=$(echo $toolchains | jq -r ".[$i].repo")
             toolchain_branch=$(echo $toolchains | jq -r ".[$i].branch")
-
-            git clone --recursive --depth=1 -j $(nproc) --branch $toolchain_branch $toolchain_repo $toolchain_name
-            echo "🤔 Clone $toolchain_name => ($toolchain_repo)"
+            # From archive
+            toolchain_url=$(echo $toolchains | jq -r ".[$i].url")
+            
+            echo $toolchain_url
+            if [ -z "${toolchain_url:-}" ] || [ "$toolchain_url" = "null" ];  then
+              git clone --recursive --depth=1 -j $(nproc) --branch $toolchain_branch $toolchain_repo $toolchain_name
+              echo "🤔 Clone $toolchain_name => ($toolchain_repo)"
+            else
+              wget "$toolchain_url"
+              filename="${toolchain_url##*/}"
+              mkdir -p $toolchain_name
+              case "$filename" in
+                *.zip)
+                  unzip -d $toolchain_name "$filename"
+                  ;;
+                *.tar)
+                  tar xvf "$filename" -C $toolchain_name
+                  ;;
+                *.tar.gz)
+                  tar zxvf "$filename" -C $toolchain_name
+                  ;;
+                *.rar)
+                  unrar x "$filename" $toolchain_name
+                  ;;
+                *)
+                  echo "unknown file type: $filename"
+                  ;;
+              esac
+            fi
 
             jq -r ".[$i].binPath[] | tostring" <<< "$toolchains" | while read -r bin_path; do
               echo "$WORKSPACE/$toolchain_name/$bin_path" >> $GITHUB_PATH
@@ -112,13 +160,26 @@ jobs:
             args="$args ARCH=$ARCH"
           fi
           if [ -n "$CC" ]; then
-            args="$args CC=${{ env.WORKSPACE }}/$CC"
+
+            if [[ "$CC" == *"/"* ]]; then
+              CC=${{ env.WORKSPACE }}/$CC
+            fi
+
+            if [ ${{ env.ccache }} = true ]; then
+              args="$args CC=\"ccache $CC\""
+            else
+              args="$args CC=$CC"
+            fi
           fi
           while read -r externalCommand; do
-            args="$args $externalCommand"
-          done < <(jq -r '.externalCommand | to_entries[] | "\(.key)=${{ env.WORKSPACE }}/\(.value)"' <<< "$params")
-
-
+            key=$(echo "$externalCommand" | cut -d= -f1)
+            value=$(echo "$externalCommand" | cut -d= -f2)
+            if [[ "$value" == *"/"* ]]; then
+              value="${{ env.WORKSPACE }}/$value"
+            fi
+            args="$args $key=$value"
+          done < <(jq -r '.externalCommand | to_entries[] | "\(.key)=\(.value)"' <<< "$params")
+        
           echo "🤔 $args"
           echo "ARCH=$ARCH" >> $GITHUB_OUTPUT
           echo "args=$args" >> $GITHUB_OUTPUT
@@ -159,7 +220,7 @@ jobs:
           args: ${{ steps.generate-args.outputs.args }}
         run: |
           echo "PATH Variable: $PATH"
-          make ${args}
+          make ${{ env.args }}
 
       - name: "💛 Upload Image"
         uses: actions/upload-artifact@v3

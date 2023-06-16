@@ -80,6 +80,7 @@ Set-repos 作业从配置文件中读取内核源，并将其输出到 Build-Ker
         "binPath": ["bin"]
       }
     ],
+    "ccache": false,
     "params": {
       "ARCH": "arm64",
       "CC": "proton-clang/bin/clang",
@@ -123,6 +124,7 @@ Set-repos 作业从配置文件中读取内核源，并将其输出到 Build-Ker
         "binPath": ["bin"]
       }
     ],
+    "ccache": true,
     "params": {
       "ARCH": "arm64",
       "CC": "proton-clang/bin/clang",
@@ -157,7 +159,7 @@ Set-repos 作业从配置文件中读取内核源，并将其输出到 Build-Ker
       "device": "thyme",
       "defconfig": "thyme_defconfig"
     },
-    "withKernelSU": true,
+    "withKernelSU": false,
     "toolchains": [
       {
         "repo": "https://github.com/kdrag0n/proton-clang",
@@ -166,6 +168,7 @@ Set-repos 作业从配置文件中读取内核源，并将其输出到 Build-Ker
         "binPath": ["bin"]
       }
     ],
+    "ccache": true,
     "params": {
       "ARCH": "arm64",
       "CC": "proton-clang/bin/clang",
@@ -218,6 +221,7 @@ Set-repos 作业从配置文件中读取内核源，并将其输出到 Build-Ker
       "binPath": []
     }
   ],
+  "ccache": false,
   "params": {
     "ARCH": "",
     "CC": "",
@@ -241,8 +245,9 @@ Set-repos 作业从配置文件中读取内核源，并将其输出到 Build-Ker
 | 字段名称     | 描述                                                                                           |
 | ------------ | ---------------------------------------------------------------------------------------------- |
 | kernelSource | 内核源代码的相关信息，包括名称、仓库地址、分支和设备类型。                                     |
-| withKernelSU | 一个布尔值，表示是否使用了名为 `KernelSU` 的内核补丁工具。                                     |
+| withKernelSU | 一个布尔值，表示是否使用了名为 `KernelSU` 的内核补丁。                                         |
 | toolchains   | 一个数组，包含了需要用到的工具链的相关信息，包括仓库地址、分支和名称。                         |
+| ccache       | 一个布尔值，表示是否使用了名为 `ccache` 的编译工具来加速编译。                                 |
 | params       | 一个对象，包含了构建参数的相关信息，其中包括了架构类型、交叉编译器、编译器等信息。             |
 | AnyKernel3   | 一个对象，包含了构建内核刷机包的相关信息，其中包括了使用的 `AnyKernel3` 仓库地址、分支等信息。 |
 
@@ -264,8 +269,61 @@ Set-repos 作业从配置文件中读取内核源，并将其输出到 Build-Ker
 | -------------- | ------ | -------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | `repo`         | 字符串 | 工具链仓库地址       | 工具链对应的 `git` 仓库地址                                                                                          |
 | `branch`       | 字符串 | 工具链所在分支       | 对应仓库的指定分支                                                                                                   |
+| `url`          | 字符串 | 工具链所在下载地址   | 对应编译工具链的地址                                                                                                 |
 | `name`         | 字符串 | 工具链名称           | 克隆到本地的文件夹名称，自定义                                                                                       |
 | `binPath`      | 数组   | 工具链二进制文件路径 | 编译时候会用到的 `bin` 文件所在的路径(相对于克隆后所在文件夹的路径)<br/>在编译的时候会转化为**绝对路径**进行参数设置 |
+
+因此你可以使用如下几形式来获取编译工具链:
+
+#### 1. 使用 `Git` 拉取编译工具链
+
+```json
+"toolchains": [
+  {
+    "repo": "https://github.com/kdrag0n/proton-clang",
+    "branch": "master",
+    "name": "proton-clang",
+    "binPath": ["./bin"]
+  }
+]
+```
+
+#### 2. 使用 `wget` 下载编译工具链
+
+这种方式可以获取到 `.zip` | `.tar` | `.tar.gz` | `.rar` 格式的编译工具链压缩包。
+
+```json
+"toolchains": [
+  {
+    "url": "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master-kernel-build-2022/clang-r450784d.tar.gz",
+    "name": "clang",
+    "binPath": ["./bin"]
+  },
+  {
+    "url": "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz",
+    "name": "gcc",
+    "binPath": ["bin"]
+  }
+]
+```
+
+#### 3. 混合模式(同时使用 `Git` 和 `wget`)
+
+```json
+"toolchains": [,
+  {
+    "repo": "https://gitlab.com/ThankYouMario/android_prebuilts_clang-standalone/",
+    "branch": "11",
+    "name": "clang",
+    "binPath": ["bin"]
+  },
+  {
+    "url": "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz",
+    "name": "gcc",
+    "binPath": ["bin"]
+  }
+]
+```
 
 ### 编译参数(params)
 
@@ -316,7 +374,7 @@ make -j$(nproc --all) \
 
 1. 在 GitHub 上 `fork` 本项目
 
-2. 通过 Github 网页或者拉取到本地修改 `repos.json` 文件，并提交修改
+2. 通过 Github 网页或者拉取到本地修改 `repos/repos*.json` 文件，并提交修改
 
 3. 查看 Github 网页的 `Action` 页面，找到 `Build kernels` 并 `Run workflow`
 
@@ -360,9 +418,8 @@ act --artifact-server-path /tmp/artifacts -v
 
 # TODO 列表
 
-- 为第三方编译器添加相对路径支持（现在使用绝对路径）。
-- 使用 `ccache` 加快编译速度。
-- 通过 `wget` 添加 `.tar.gz` 文件作为第三方编译器（现在使用 `git` 获取工具链）。
+- 使用 `MagiskBoot` 来生成 `boot.img`
+- 生成配置文件的网页
 
 # 致谢
 
